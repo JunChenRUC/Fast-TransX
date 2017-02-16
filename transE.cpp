@@ -154,6 +154,8 @@ void init() {
     fclose(f3);
 	
 	int count = 0;
+	trainHead = (Triple *)calloc(tripleTotal, sizeof(Triple));
+	trainTail = (Triple *)calloc(tripleTotal, sizeof(Triple));
 	trainList = (Triple *)calloc(tripleTotal, sizeof(Triple));
 	
 	FILE* f4 = fopen((inputPath + "train.txt").c_str(),"r");
