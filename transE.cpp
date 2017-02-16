@@ -1,3 +1,11 @@
+//============================================================================
+// Name        : TransE.cpp
+// Author      : 
+// Version     :
+// Copyright   : Your copyright notice
+// Description : Hello World in C++, Ansi-style
+//============================================================================
+
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -6,20 +14,23 @@
 #include <string>
 #include <algorithm>
 #include <pthread.h>
+#include <map>
+#include <set>
+#include <vector>
 
 using namespace std;
 
 const float pi = 3.141592653589793238462643383;
 
-int transeThreads = 8;
+int transeThreads = 2;
 int transeTrainTimes = 3000;
 int nbatches = 1;
 int dimension = 50;
 float transeAlpha = 0.001;
 float margin = 1;
 
-string inPath = "../";
-string outPath = "../";
+string inputPath = "D://kb_data/instance_processed/";
+string outputPath = "D://kb_data/instance_processed/TransE/";
 
 int *lefHead, *rigHead;
 int *lefTail, *rigTail;
@@ -87,59 +98,87 @@ void norm(float * con) {
 			*(con + ii) /= x;
 }
 
-/*
-	Read triples from the training file.
-*/
-
 int relationTotal, entityTotal, tripleTotal;
 float *relationVec, *entityVec;
-float *relationVecDao, *entityVecDao;
+map<int,string> id2entity,id2relation;
+map<string,int> relation2id,entity2id;
+map<int,int> entity2type;
 
 void init() {
+	int x,y;
+	char buf1[1000], buf2[1000], buf3[1000];
 
-	FILE *fin;
-	int tmp;
-
-	fin = fopen((inPath + "relation2id.txt").c_str(), "r");
-	tmp = fscanf(fin, "%d", &relationTotal);
-	fclose(fin);
-
+	//initial entity 2 id
+    FILE* f1 = fopen((inputPath + "entity2id.txt").c_str(),"r");
+	while (fscanf(f1,"%s%d%d", buf1, &x, &y) == 3){
+		string name = buf1;
+		entity2id[name] = x;
+		id2entity[x] = name;
+		entity2type[x] = y;
+		entityTotal ++;
+	}
+	fclose(f1);
+	
+	//initial entity 2 vector
+	entityVec = (float *)calloc(entityTotal * dimension, sizeof(float));
+	for (int i = 0; i < entityTotal; i++) {
+		for (int ii=0; ii<dimension; ii++)
+			entityVec[i * dimension + ii] = randn(0, 1.0 / dimension, -6 / sqrt(dimension), 6 / sqrt(dimension));
+		norm(entityVec + i*dimension);
+	}
+	printf("Reading file: %s, fishing initialization, entity number is %d\n", (inputPath + "entity2id.txt").c_str(), entityTotal);
+	
+	//initial relation 2 id
+	FILE* f2 = fopen((inputPath + "relation2id.txt").c_str(),"r");
+	while (fscanf(f2,"%s%d", buf1, &x) == 2){
+		string name = buf1;
+		relation2id[name] = x;
+		id2relation[x] = name;
+		relationTotal ++;
+	}
+	fclose(f2);
+	
+	//initial relation 2 vector
 	relationVec = (float *)calloc(relationTotal * dimension, sizeof(float));
 	for (int i = 0; i < relationTotal; i++) {
 		for (int ii=0; ii<dimension; ii++)
 			relationVec[i * dimension + ii] = randn(0, 1.0 / dimension, -6 / sqrt(dimension), 6 / sqrt(dimension));
 	}
-
-	fin = fopen((inPath + "entity2id.txt").c_str(), "r");
-	tmp = fscanf(fin, "%d", &entityTotal);
-	fclose(fin);
-
-	entityVec = (float *)calloc(entityTotal * dimension, sizeof(float));
-	for (int i = 0; i < entityTotal; i++) {
-		for (int ii=0; ii<dimension; ii++)
-			entityVec[i * dimension + ii] = randn(0, 1.0 / dimension, -6 / sqrt(dimension), 6 / sqrt(dimension));
-		norm(entityVec+i*dimension);
+	printf("Reading file: %s, fishing initialization, relation number is %d\n", (inputPath + "relation2id.txt").c_str(), relationTotal);
+	
+	//initial triple
+    FILE* f3 = fopen((inputPath + "train.txt").c_str(),"r");
+    while (fscanf(f3,"%s%s%s", buf1, buf2, buf3) == 3){
+		tripleTotal ++;
 	}
-
-	fin = fopen((inPath + "triple2id.txt").c_str(), "r");
-	tmp = fscanf(fin, "%d", &tripleTotal);
+    fclose(f3);
+	
+	int count = 0;
 	trainHead = (Triple *)calloc(tripleTotal, sizeof(Triple));
 	trainTail = (Triple *)calloc(tripleTotal, sizeof(Triple));
 	trainList = (Triple *)calloc(tripleTotal, sizeof(Triple));
-	tripleTotal = 0;
-	while (fscanf(fin, "%d", &trainList[tripleTotal].h) == 1) {
-		tmp = fscanf(fin, "%d", &trainList[tripleTotal].t);
-		tmp = fscanf(fin, "%d", &trainList[tripleTotal].r);
-		trainHead[tripleTotal].h = trainList[tripleTotal].h;
-		trainHead[tripleTotal].t = trainList[tripleTotal].t;
-		trainHead[tripleTotal].r = trainList[tripleTotal].r;
-		trainTail[tripleTotal].h = trainList[tripleTotal].h;
-		trainTail[tripleTotal].t = trainList[tripleTotal].t;
-		trainTail[tripleTotal].r = trainList[tripleTotal].r;
-		tripleTotal++;
+	
+	FILE* f4 = fopen((inputPath + "train.txt").c_str(),"r");
+	while (fscanf(f4,"%s%s%s", buf1, buf2, buf3) == 3){
+		string head = buf1, tail = buf2, relation = buf3;
+		int headId = entity2id[head];
+		int tailId = entity2id[tail];
+		int relationId = relation2id[relation];
+		trainList[count].h = headId;
+		trainList[count].t = tailId;
+		trainList[count].r = relationId;
+		trainHead[count].h = headId;
+		trainHead[count].t = tailId;
+		trainHead[count].r = relationId;
+		trainTail[count].h = headId;
+		trainTail[count].t = tailId;
+		trainTail[count].r = relationId;
+		
+		count ++;
 	}
-	fclose(fin);
-
+	fclose(f4);
+	printf("Reading file: %s, triple number is %d\n", (inputPath + "train.txt").c_str(), tripleTotal);
+	
 	sort(trainHead, trainHead + tripleTotal, cmp_head());
 	sort(trainTail, trainTail + tripleTotal, cmp_tail());
 
@@ -161,9 +200,6 @@ void init() {
 	}
 	rigHead[trainHead[tripleTotal - 1].h] = tripleTotal - 1;
 	rigTail[trainTail[tripleTotal - 1].t] = tripleTotal - 1;
-
-	relationVecDao = (float*)calloc(dimension * relationTotal, sizeof(float));
-	entityVecDao = (float*)calloc(dimension * entityTotal, sizeof(float));
 }
 
 /*
@@ -179,9 +215,9 @@ float calc_sum(int e1, int e2, int rel) {
 	int last1 = e1 * dimension;
 	int last2 = e2 * dimension;
 	int lastr = rel * dimension;
-        	for (int ii=0; ii < dimension; ii++) {
-            		sum += fabs(entityVec[last2 + ii] - entityVec[last1 + ii] - relationVec[lastr + ii]);	
-            	}
+	for (int ii=0; ii < dimension; ii++) {
+		sum += fabs(entityVec[last2 + ii] - entityVec[last1 + ii] - relationVec[lastr + ii]);	
+	}
 	return sum;
 }
 
@@ -331,22 +367,23 @@ void* train_transe(void *con) {
 */
 
 void out_transe() {
-		FILE* f2 = fopen((outPath + "relation2vec.bern").c_str(), "w");
-		FILE* f3 = fopen((outPath + "entity2vec.bern").c_str(), "w");
-		for (int i=0; i < relationTotal; i++) {
-			int last = dimension * i;
-			for (int ii = 0; ii < dimension; ii++)
-				fprintf(f2, "%.6f\t", relationVec[last + ii]);
-			fprintf(f2,"\n");
-		}
-		for (int  i = 0; i < entityTotal; i++) {
-			int last = i * dimension;
-			for (int ii = 0; ii < dimension; ii++)
-				fprintf(f3, "%.6f\t", entityVec[last + ii] );
-			fprintf(f3,"\n");
-		}
-		fclose(f2);
-		fclose(f3);
+	FILE* f1 = fopen((outputPath + "relation2vec.bern").c_str(), "w");
+	for (int i = 0; i < relationTotal; i ++) {
+		int last = dimension * i;
+		for (int j = 0; j < dimension; j ++)
+			fprintf(f1, "%.6f\t", relationVec[last + j]);
+		fprintf(f1,"\n");
+	}
+	fclose(f1);
+	
+	FILE* f2 = fopen((outputPath + "entity2vec.bern").c_str(), "w");
+	for (int  i = 0; i < entityTotal; i ++) {
+		int last = i * dimension;
+		for (int j = 0; j < dimension; j ++)
+			fprintf(f2, "%.6f\t", entityVec[last + j] );
+		fprintf(f2,"\n");
+	}
+	fclose(f2);
 }
 
 /*
